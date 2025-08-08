@@ -38,7 +38,7 @@ This project is a Python-based web scraping tool that simulates a search engine 
 4.  **Configure the script (`google-web-crawler.py`):**
     -   **Set Chrome Version (Crucial!)**: Open `google-web-crawler.py` and find this line:
         ```python
-        driver = uc.Chrome(options=options, version_main=138)
+        driver = uc.Chrome(options=options, version_main=139)
         ```
         You **must** change `138` to the major version of your installed Google Chrome browser. For example, if your Chrome version is `139.0.7258.67`, the major version is `139`. You can find your version at `chrome://settings/help`.
 

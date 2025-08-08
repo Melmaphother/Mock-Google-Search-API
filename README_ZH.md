@@ -38,7 +38,7 @@
 4.  **配置脚本 (`google-web-crawler.py`):**
     -   **设置Chrome版本 (非常重要!)**: 打开 `google-web-crawler.py` 文件，找到这一行：
         ```python
-        driver = uc.Chrome(options=options, version_main=138)
+        driver = uc.Chrome(options=options, version_main=139)
         ```
         你**必须**将 `138` 修改为你电脑上安装的 Google Chrome 浏览器的主版本号。例如，如果你的Chrome版本为 `139.0.7258.67`，那么主版本号就是 `139`。你可以在浏览器的 `chrome://settings/help` 页面找到你的版本号。
 
