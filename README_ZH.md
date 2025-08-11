@@ -1,8 +1,8 @@
-# Mock-Google-Search-API 🕷️
+# 🕷️ Mock-Google-Search-API
 
 本项目是一个基于 Python 的网络爬虫工具，用于模拟搜索引擎 API。它接收一个查询列表，为每个查询执行 Google 搜索，然后抓取顶部搜索结果的网页内容。该工具对于需要大量收集数据用于研究和实验，但又希望避免官方搜索 API 高昂费用的场景非常有用。
 
-## 功能特性
+## ✨ 功能特性
 
 - **反机器人检测**: 使用 `undetected-chromedriver` 来模拟真实用户，以绕过许多常见的反机器人机制。
 - **会话持久化**: 将浏览器会话数据（如 Cookies）保存到本地配置文件中，有助于避免重复的人机验证（CAPTCHA）。
@@ -89,11 +89,11 @@
 - `link` (字符串): 指向网页的直接 URL。
 - `content` (字符串): 从网页上抓取的主要文本内容。
 
-## 远程模式：服务器 + 本机 Chrome
+## 🌐 远程模式：服务器 + 本机 Chrome
 
 本项目提供 `google-web-crawler-remote.py` 远程模式：在服务器（无 Chrome）上运行轻量 HTTP 队列服务，在你本机（有 Chrome）运行客户端领取任务、执行真实搜索并回传结果。
 
-### 什么是 google-web-crawler-remote.py
+### ℹ️ 什么是 google-web-crawler-remote.py
 
 - 服务器：内存任务队列与结果收集，支持 token 与结果落盘。
 - 客户端：在本机运行，拉取任务，调用 `google-web-crawler.py`（需本机 Chrome），回传结果。
@@ -115,7 +115,7 @@ python google-web-crawler-remote.py server \
 
 注意：客户端使用前，请将本机 `google-web-crawler.py` 中的 `version_main` 调成本机 Chrome 主版本号。
 
-### 仅用 HTTP（不用 SSH）
+### 🔓 仅用 HTTP（不用 SSH）
 
 直接使用服务器公网 IP 与端口访问。需确保服务器防火墙/安全组放通 8765/TCP。这是网络允许时最简单的拓扑。
 
@@ -151,7 +151,7 @@ curl -H "X-Auth-Token: YOUR_TOKEN" http://<SERVER_IP>:8765/api/status
 - 不带 `--server` 的 `enqueue` 仅入队到当前进程（演示用途）；要入队到运行中的服务端，请加 `--server`。
 - 若网络不允许自定义端口，可用 80/443 或通过 Nginx 反代到 `127.0.0.1:8765`。
 
-### 用 SSH 建立信道 —— 建议
+### 🔒 用 SSH 建立信道 —— 建议
 
 若外网无法直连 8765，可在本机建立 SSH 本地端口转发，将本地端口映射到服务器 8765。
 
@@ -189,7 +189,6 @@ python google-web-crawler-remote.py enqueue \
 ```
 
 通过隧道查看状态（在 本机 上执行）：
-
 
 ```bash
 curl --noproxy '*' -H "X-Auth-Token: YOUR_TOKEN" http://127.0.0.1:18765/api/status

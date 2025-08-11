@@ -1,8 +1,8 @@
-# Mock-Google-Search-API 🕷️
+# 🕷️ Mock-Google-Search-API
 
 This project is a Python-based web scraping tool that simulates a search engine API. It takes a list of queries, performs a Google search for each, and then scrapes the content from the top search results. This is useful for gathering data for research and experiments without incurring the high costs of official search APIs.
 
-## Features
+## ✨ Features
 
 - **Anti-Bot Detection**: Uses `undetected-chromedriver` to appear more like a real user, bypassing many common anti-bot mechanisms.
 - **Persistent Session**: Saves browser session data (cookies, etc.) to a local profile, which helps in avoiding repeated CAPTCHA challenges.
@@ -89,11 +89,11 @@ Each JSON object in the output file has the following key-value structure:
 - `link` (string): The direct URL to the web page.
 - `content` (string): The main text content scraped from the web page.
 
-## Remote Mode: Server + Local Chrome
+## 🌐 Remote Mode: Server + Local Chrome
 
 This project also supports a remote mode via `google-web-crawler-remote.py`. Run a lightweight HTTP queue on a server (without Chrome), and run the client on your local machine (with Chrome) to perform real searches and upload results back.
 
-### What is google-web-crawler-remote.py
+### ℹ️ What is google-web-crawler-remote.py
 
 - Server: in-memory task queue and result collection, with optional token and result file output.
 - Client: runs locally, pulls tasks from the server, executes `google-web-crawler.py` (Chrome required), and posts results to the server.
@@ -115,7 +115,7 @@ python google-web-crawler-remote.py server \
 
 Note: On the client, you must set the correct `version_main` in `google-web-crawler.py` to match your local Chrome major version.
 
-### HTTP only (no SSH)
+### 🔓 HTTP only (no SSH)
 
 Use the server's public IP and port directly. Ensure inbound 8765/TCP is allowed by firewall/security groups. This is the simplest topology if your network permits it.
 
@@ -151,7 +151,7 @@ Notes:
 - The CLI `enqueue` without `--server` enqueues into the current process only (for demo). Use `--server` to send tasks to the running server.
 - Some networks block custom ports; consider running on 80/443 or placing Nginx in front to reverse-proxy to `127.0.0.1:8765`.
 
-### With SSH tunnel – recommend
+### 🔒 With SSH tunnel – recommend
 
 If direct inbound to 8765 is blocked, create a local SSH tunnel that forwards a local port to the server's 8765.
 
