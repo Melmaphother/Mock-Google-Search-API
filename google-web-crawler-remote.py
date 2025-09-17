@@ -13,7 +13,7 @@ from urllib.parse import urlparse, parse_qs
 
 
 # ------------------------------
-# 简易内存任务队列与结果存储
+# Simple in-memory task queue and result storage
 # ------------------------------
 
 
@@ -110,7 +110,7 @@ GLOBAL_STORE = TaskStore()
 
 
 # ------------------------------
-# HTTP 服务端实现（仅使用标准库）
+# HTTP server implementation (using standard library only)
 # ------------------------------
 
 

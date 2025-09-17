@@ -1,5 +1,7 @@
 # 🕷️ Mock-Google-Search-API
 
+![](assets/framework.png)
+
 This project is a Python-based web scraping tool that simulates a search engine API. It takes a list of queries, performs a Google search for each, and then scrapes the content from the top search results. This is useful for gathering data for research and experiments without incurring the high costs of official search APIs.
 
 ## ✨ Features
@@ -177,7 +179,7 @@ python google-web-crawler-remote.py client \
   --crawler-script /path/to/google-web-crawler.py
 ```
 
-Enqueue via the tunnel (run on CLIENT/local machine):
+Enqueue via the tunnel (run on REMOTE):
 
 ```bash
 python google-web-crawler-remote.py enqueue \

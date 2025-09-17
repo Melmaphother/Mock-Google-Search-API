@@ -6,8 +6,10 @@ import os
 import json
 import re
 import undetected_chromedriver as uc
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
-def search_google(query, num_results=10, proxy=None):
+def search_google(query, num_results=10, proxy=None, filter_year=None):
     """
     Performs a Google search using an undetected chromedriver to avoid bot detection.
     
@@ -15,12 +17,18 @@ def search_google(query, num_results=10, proxy=None):
         query (str): The search term.
         num_results (int): The number of results to retrieve.
         proxy (str, optional): Proxy server to use (e.g., "http://user:pass@host:port"). Defaults to None.
+        filter_year (int, optional): Filter results by specific year (e.g., 2023). Defaults to None.
 
     Returns:
         list: A list of dictionaries, each containing search result data.
     """
     encoded_query = quote_plus(query)
     search_url = f"https://www.google.com/search?q={encoded_query}&num={num_results}&hl=en"
+    
+    # Add year filter if specified
+    if filter_year:
+        # Google's date filter format: cd_min:1/1/YEAR,cd_max:12/31/YEAR
+        search_url += f"&tbs=cdr:1,cd_min:1/1/{filter_year},cd_max:12/31/{filter_year}"
 
     print(f"[*] Searching Google for '{query}'...")
 
@@ -36,7 +44,8 @@ def search_google(query, num_results=10, proxy=None):
     
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--start-maximized")
+    options.add_argument("--headless")  # 无头模式，不显示浏览器窗口
+    options.add_argument("--window-size=1920,1080")  # 设置窗口大小（即使不可见）
     
     driver = None
     try:
@@ -106,16 +115,24 @@ def search_google(query, num_results=10, proxy=None):
             driver.quit()
 
 
-def scrape_page_content(url):
+def scrape_page_content(url, idx=None):
     """
     Scrapes the main content and metadata from a given webpage URL.
+    
+    Args:
+        url (str): The URL to scrape.
+        idx (int, optional): Index for logging purposes.
+    
+    Returns:
+        dict: Scraped content or None if failed.
     """
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
 
     try:
-        print(f"    [*] Scraping content from {url}")
+        log_prefix = f"    [{idx+1}]" if idx is not None else "    [*]"
+        print(f"{log_prefix} Scraping content from {url}")
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
 
@@ -159,27 +176,34 @@ def scrape_page_content(url):
         }
 
     except requests.exceptions.RequestException as e:
-        print(f"    [!] Failed to scrape {url}. Reason: {e}")
+        log_prefix = f"    [{idx+1}]" if idx is not None else "    [!]"
+        print(f"{log_prefix} Failed to scrape {url}. Reason: {e}")
         return None
 
 
-def simulate_search_api(query, top_k=5, proxy=None):
+def scrape_multiple_pages_concurrent(google_results, max_workers=3, delay_between_batches=0.5):
     """
-    Orchestrates the two-step process of searching and then scraping results.
+    Concurrently scrapes multiple pages with controlled parallelism.
+    
+    Args:
+        google_results (list): List of Google search results.
+        max_workers (int): Maximum number of concurrent threads. Defaults to 3.
+        delay_between_batches (float): Delay between thread batches to be polite. Defaults to 0.5.
+    
+    Returns:
+        list: List of successfully processed results with scraped content.
     """
-    google_results = search_google(query, num_results=top_k, proxy=proxy)
-
-    if not google_results:
-        print(f"[!] Could not retrieve initial search results for query: '{query}'. Skipping.")
-        return []
-
+    print(f"🚀 Starting concurrent scraping of {len(google_results)} URLs with {max_workers} workers...")
+    
     final_results = []
-    for idx, result in enumerate(google_results):
-        time.sleep(1) # Be polite to servers
-        page_data = scrape_page_content(result['link'])
-
+    results_lock = threading.Lock()
+    
+    def scrape_with_result(idx_and_result):
+        idx, result = idx_and_result
+        page_data = scrape_page_content(result['link'], idx)
+        
         if page_data and page_data["full_content"]:
-            _search_result = {
+            processed_result = {
                 "idx": idx,
                 "title": result["title"],
                 "date": page_data["date"],
@@ -189,12 +213,99 @@ def simulate_search_api(query, top_k=5, proxy=None):
                 "link": result['link'],
                 "content": page_data["full_content"]
             }
-            final_results.append(_search_result)
-            print(f"    [+] Successfully processed result {idx+1}/{len(google_results)}")
+            
+            with results_lock:
+                final_results.append(processed_result)
+            
+            print(f"    ✅ [{idx+1}] Successfully processed: {result['title'][:50]}...")
+            return processed_result
         else:
-            print(f"    [-] Skipping result {idx+1} due to scraping failure.")
+            print(f"    ❌ [{idx+1}] Failed to process: {result['title'][:50]}...")
+            return None
     
+    # Create enumerated list for processing
+    indexed_results = list(enumerate(google_results))
+    
+    # Use ThreadPoolExecutor for concurrent processing
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        future_to_idx = {
+            executor.submit(scrape_with_result, idx_result): idx_result[0] 
+            for idx_result in indexed_results
+        }
+        
+        # Add small delay between submissions to be polite
+        if delay_between_batches > 0:
+            time.sleep(delay_between_batches)
+        
+        # Collect results as they complete
+        completed_count = 0
+        for future in as_completed(future_to_idx):
+            completed_count += 1
+            try:
+                result = future.result()
+                print(f"📊 Progress: {completed_count}/{len(google_results)} completed")
+            except Exception as e:
+                idx = future_to_idx[future]
+                print(f"    ⚠️  [{idx+1}] Exception during processing: {e}")
+    
+    # Sort results by original index to maintain order
+    final_results.sort(key=lambda x: x["idx"])
+    
+    print(f"🎉 Concurrent scraping completed! {len(final_results)}/{len(google_results)} pages successfully processed.")
     return final_results
+
+
+def simulate_search_api(query, top_k=5, proxy=None, filter_year=None, use_concurrent=True, max_workers=3):
+    """
+    Orchestrates the two-step process of searching and then scraping results.
+    
+    Args:
+        query (str): The search term.
+        top_k (int): Number of top results to return.
+        proxy (str, optional): Proxy server to use. Defaults to None.
+        filter_year (int, optional): Filter results by specific year. Defaults to None.
+        use_concurrent (bool): Whether to use concurrent scraping. Defaults to True.
+        max_workers (int): Maximum concurrent workers for scraping. Defaults to 3.
+    
+    Returns:
+        list: A list of dictionaries containing search results with scraped content.
+    """
+    google_results = search_google(query, num_results=top_k, proxy=proxy, filter_year=filter_year)
+
+    if not google_results:
+        print(f"[!] Could not retrieve initial search results for query: '{query}'. Skipping.")
+        return []
+
+    if use_concurrent:
+        # Use concurrent scraping for faster processing
+        print(f"⚡ Using concurrent scraping mode with {max_workers} workers")
+        return scrape_multiple_pages_concurrent(google_results, max_workers=max_workers)
+    else:
+        # Use original sequential scraping
+        print("🐌 Using sequential scraping mode")
+        final_results = []
+        for idx, result in enumerate(google_results):
+            time.sleep(1)  # Be polite to servers
+            page_data = scrape_page_content(result['link'], idx)
+
+            if page_data and page_data["full_content"]:
+                _search_result = {
+                    "idx": idx,
+                    "title": result["title"],
+                    "date": page_data["date"],
+                    "google_snippet": result["snippet"],
+                    "subpage_snippet": page_data["subpage_snippet"],
+                    "source": page_data["source"],
+                    "link": result['link'],
+                    "content": page_data["full_content"]
+                }
+                final_results.append(_search_result)
+                print(f"    [+] Successfully processed result {idx+1}/{len(google_results)}")
+            else:
+                print(f"    [-] Skipping result {idx+1} due to scraping failure.")
+        
+        return final_results
 
 def sanitize_filename(query):
     """
@@ -214,6 +325,14 @@ if __name__ == "__main__":
         "Python undetected-chromedriver tutorial"
     ]
     
+    # --- Year Filter Configuration ---
+    # Set to specific year to filter results (e.g., 2023), or None for no filter
+    filter_year = None  # Example: 2023 to get only 2023 results
+    
+    # --- Performance Configuration ---
+    use_concurrent_scraping = True  # Enable concurrent scraping for faster processing
+    max_concurrent_workers = 3      # Number of concurrent threads (recommended: 2-5)
+    
     number_of_results_to_process = 3
     output_directory = "search_outputs"
     
@@ -230,7 +349,8 @@ if __name__ == "__main__":
         print("--- Chrome profile not found, try to initialize it ---")
         print("="*80 + "\n")
 
-        simulate_search_api(initial_query, top_k=1, proxy=proxy_server)
+        simulate_search_api(initial_query, top_k=1, proxy=proxy_server, filter_year=filter_year, 
+                            use_concurrent=use_concurrent_scraping, max_workers=max_concurrent_workers)
 
         if os.path.exists("chrome_profile"):
             print("\n" + "="*80)
@@ -247,7 +367,9 @@ if __name__ == "__main__":
         print(f"--- Processing Query {i+1}/{len(queries_to_process)}: '{query}' ---")
         print("="*80 + "\n")
         
-        final_data = simulate_search_api(query, top_k=number_of_results_to_process, proxy=proxy_server)
+        final_data = simulate_search_api(query, top_k=number_of_results_to_process, proxy=proxy_server, 
+                                         filter_year=filter_year, use_concurrent=use_concurrent_scraping, 
+                                         max_workers=max_concurrent_workers)
 
         print(f"\n--- Query Processing Complete for '{query}' ---")
 
