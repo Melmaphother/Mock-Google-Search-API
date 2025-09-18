@@ -18,30 +18,51 @@ from urllib.parse import urlparse, parse_qs
 
 
 class Task:
-    def __init__(self, query: str, top_k: int = 3, proxy: str | None = None):
+    def __init__(self, query: str, top_k: int = 3, proxy: str | None = None, filter_year: int | None = None):
         self.id = str(uuid.uuid4())
         self.query = query
         self.top_k = int(top_k)
         self.proxy = proxy
+        self.filter_year = filter_year
         self.status = "queued"  # queued -> running -> done/failed
         self.created_at = time.time()
         self.started_at: float | None = None
         self.finished_at: float | None = None
         self.error: str | None = None
+        self.show_browser = False  # Whether to show browser for this task
 
 
 class TaskStore:
-    def __init__(self):
+    def __init__(self, cleanup_interval: int = 20):
         self._pending_q: queue.Queue[str] = queue.Queue()
         self._tasks: dict[str, Task] = {}
         self._results: dict[str, list] = {}
         self._lock = threading.Lock()
+        
+        # Profile cleanup configuration
+        self.cleanup_interval = cleanup_interval
+        self.query_count = 0
+        self.last_cleanup_count = 0
 
     def enqueue(self, task: Task) -> str:
         with self._lock:
+            # Increment query counter
+            self.query_count += 1
+            
+            # Check if we need profile cleanup
+            if self._should_cleanup():
+                task.show_browser = True  # Show browser after cleanup
+                self.last_cleanup_count = self.query_count
+                print(f"🔄 [SERVER] Profile cleanup scheduled for query #{self.query_count}")
+            
             self._tasks[task.id] = task
             self._pending_q.put(task.id)
             return task.id
+    
+    def _should_cleanup(self) -> bool:
+        """Check if profile cleanup is needed."""
+        return (self.query_count > 1 and 
+                self.query_count - self.last_cleanup_count >= self.cleanup_interval)
 
     def dequeue(self) -> Task | None:
         try:
@@ -88,6 +109,9 @@ class TaskStore:
                 ),
                 "done": sum(1 for t in self._tasks.values() if t.status == "done"),
                 "failed": sum(1 for t in self._tasks.values() if t.status == "failed"),
+                "query_count": self.query_count,
+                "cleanup_interval": self.cleanup_interval,
+                "next_cleanup_at": self.last_cleanup_count + self.cleanup_interval,
             }
             tasks = [
                 {
@@ -95,6 +119,8 @@ class TaskStore:
                     "query": t.query,
                     "top_k": t.top_k,
                     "proxy": t.proxy,
+                    "filter_year": t.filter_year,
+                    "show_browser": t.show_browser,
                     "status": t.status,
                     "error": t.error,
                     "created_at": t.created_at,
@@ -164,6 +190,8 @@ class APIServerHandler(BaseHTTPRequestHandler):
                     "query": task.query,
                     "top_k": task.top_k,
                     "proxy": task.proxy,
+                    "filter_year": task.filter_year,
+                    "show_browser": task.show_browser,
                 }
             )
             return
@@ -207,14 +235,22 @@ class APIServerHandler(BaseHTTPRequestHandler):
             query = (data.get("query") or "").strip()
             top_k = int(data.get("top_k") or 3)
             proxy = data.get("proxy")
+            filter_year = data.get("filter_year")
+            if filter_year is not None:
+                filter_year = int(filter_year)
+            
             if not query:
                 self._write_json(
                     {"error": "query_required"}, status=HTTPStatus.BAD_REQUEST
                 )
                 return
-            task = Task(query=query, top_k=top_k, proxy=proxy)
+            task = Task(query=query, top_k=top_k, proxy=proxy, filter_year=filter_year)
             task_id = GLOBAL_STORE.enqueue(task)
-            self._write_json({"task_id": task_id})
+            self._write_json({
+                "task_id": task_id, 
+                "query_count": GLOBAL_STORE.query_count,
+                "show_browser": task.show_browser
+            })
             return
 
         if path == "/api/result":
@@ -285,7 +321,7 @@ def _load_crawler_module(crawler_script_path: str):
         "crawler_local_module", crawler_script_path
     )
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"无法加载爬虫脚本: {crawler_script_path}")
+        raise RuntimeError(f"Failed to load crawler script: {crawler_script_path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)  # type: ignore[attr-defined]
     required = [
@@ -295,7 +331,12 @@ def _load_crawler_module(crawler_script_path: str):
     ]
     for name in required:
         if not hasattr(module, name):
-            raise RuntimeError(f"爬虫脚本缺少必要函数: {name}")
+            raise RuntimeError(f"Crawler script missing required function: {name}")
+    
+    # Check if clean_chrome_profile function exists
+    if hasattr(module, "clean_chrome_profile"):
+        print("[CLIENT] Chrome profile cleanup function available")
+    
     return module
 
 
@@ -362,16 +403,33 @@ def client_loop(
             query = payload.get("query")
             top_k = int(payload.get("top_k") or 3)
             proxy = payload.get("proxy")
+            filter_year = payload.get("filter_year")
+            show_browser = payload.get("show_browser", False)
 
             if not task_id or not query:
                 time.sleep(poll_interval)
                 continue
 
             print(f"[CLIENT] got task {task_id}: '{query}' (top_k={top_k})")
+            
+            # Handle profile cleanup if requested
+            if show_browser:
+                print("🔄 [CLIENT] Profile cleanup requested")
+                if hasattr(module, "clean_chrome_profile"):
+                    import os
+                    profile_path = os.path.join(os.getcwd(), "chrome_profile")
+                    module.clean_chrome_profile(profile_path)
+                    print("🖥️ [CLIENT] Will show browser for re-initialization")
 
-            # 执行搜索
+            # Execute search
             try:
-                results = module.simulate_search_api(query, top_k=top_k, proxy=proxy)
+                results = module.simulate_search_api(
+                    query, 
+                    top_k=top_k, 
+                    proxy=proxy, 
+                    filter_year=filter_year,
+                    show_browser=show_browser
+                )
                 error = None
             except Exception as e:
                 results = None
@@ -433,6 +491,8 @@ def main():
     p_server.add_argument(
         "--output-dir", default=os.path.join(default_dir, "remote_outputs")
     )
+    p_server.add_argument("--cleanup-interval", type=int, default=5, 
+                         help="Clean Chrome profile every N queries (default: 5)")
 
     # client
     p_client = sub.add_parser("client", help="在本机运行客户端，使用Chrome执行搜索")
@@ -459,6 +519,7 @@ def main():
     p_enq.add_argument("--query", required=True)
     p_enq.add_argument("--top-k", type=int, default=3)
     p_enq.add_argument("--proxy", default=None)
+    p_enq.add_argument("--filter-year", type=int, default=None, help="Filter results by specific year")
     # 当提供 --server 时，通过HTTP调用远程 /api/enqueue 进行入队
     p_enq.add_argument(
         "--server", default=None, help="远程服务地址，例如 http://127.0.0.1:8765"
@@ -479,6 +540,10 @@ def main():
 
     if args.cmd == "server":
         os.makedirs(args.output_dir, exist_ok=True)
+        # Initialize global store with cleanup interval
+        global GLOBAL_STORE
+        GLOBAL_STORE = TaskStore(cleanup_interval=args.cleanup_interval)
+        print(f"[SERVER] Chrome profile cleanup interval: {args.cleanup_interval} queries")
         run_server(args.host, args.port, args.token, args.output_dir)
         return
 
@@ -511,6 +576,7 @@ def main():
                 "query": args.query,
                 "top_k": int(args.top_k),
                 "proxy": args.proxy,
+                "filter_year": args.filter_year,
             }
             req = urllib.request.Request(
                 url,
@@ -527,9 +593,13 @@ def main():
             return
         else:
             # 本地内存入队（仅对当前进程有效，不能影响已运行的server进程）
-            task = Task(query=args.query, top_k=args.top_k, proxy=args.proxy)
+            task = Task(query=args.query, top_k=args.top_k, proxy=args.proxy, filter_year=args.filter_year)
             task_id = GLOBAL_STORE.enqueue(task)
-            print(json.dumps({"task_id": task_id}, ensure_ascii=False))
+            print(json.dumps({
+                "task_id": task_id, 
+                "query_count": GLOBAL_STORE.query_count,
+                "show_browser": task.show_browser
+            }, ensure_ascii=False))
             return
 
     if args.cmd == "status":
