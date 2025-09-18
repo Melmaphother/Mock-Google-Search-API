@@ -35,7 +35,7 @@ def clean_chrome_profile(profile_path):
         return True
 
 
-def search_google(query, num_results=10, proxy=None, filter_year=None, show_browser=False):
+def search_google(query, num_results=10, proxy=None, filter_year=None, retry_on_error=True):
     """
     Performs a Google search using an undetected chromedriver to avoid bot detection.
     
@@ -44,7 +44,7 @@ def search_google(query, num_results=10, proxy=None, filter_year=None, show_brow
         num_results (int): The number of results to retrieve.
         proxy (str, optional): Proxy server to use. Defaults to None.
         filter_year (int, optional): Filter results by specific year (e.g., 2023). Defaults to None.
-        show_browser (bool): Whether to show browser window (False for headless mode). Defaults to False.
+        retry_on_error (bool): Whether to retry with profile cleanup on error. Defaults to True.
 
     Returns:
         list: A list of dictionaries, each containing search result data.
@@ -71,14 +71,7 @@ def search_google(query, num_results=10, proxy=None, filter_year=None, show_brow
     
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    
-    # Control browser visibility
-    if show_browser:
-        print("🖥️ Running in visible browser mode")
-        options.add_argument("--start-maximized")
-    else:
-        print("👻 Running in headless mode")
-        options.add_argument("--headless")
+    options.add_argument("--headless")  # Always run in headless mode
 
     driver = None
     try:
@@ -142,6 +135,29 @@ def search_google(query, num_results=10, proxy=None, filter_year=None, show_brow
 
     except Exception as e:
         print(f"[!] An error occurred during the browser-based search: {e}")
+        
+        # If retry is enabled, clean profile and try once more
+        if retry_on_error:
+            print("🔄 Attempting to recover by cleaning Chrome profile...")
+            profile_path = os.path.join(os.getcwd(), "chrome_profile")
+            
+            # Clean up the driver first
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+                driver = None
+            
+            # Clean the profile
+            if clean_chrome_profile(profile_path):
+                print("♻️ Retrying search with clean profile...")
+                try:
+                    # Recursive call with retry disabled to avoid infinite loop
+                    return search_google(query, num_results, proxy, filter_year, retry_on_error=False)
+                except Exception as retry_e:
+                    print(f"[!] Retry also failed: {retry_e}")
+        
         return []
     finally:
         if driver:
@@ -289,7 +305,7 @@ def scrape_multiple_pages_concurrent(google_results, max_workers=3, delay_betwee
     return final_results
 
 
-def simulate_search_api(query, top_k=5, proxy=None, filter_year=None, use_concurrent=True, max_workers=3, show_browser=False):
+def simulate_search_api(query, top_k=5, proxy=None, filter_year=None, use_concurrent=True, max_workers=3):
     """
     Orchestrates the two-step process of searching and then scraping results.
     
@@ -300,12 +316,11 @@ def simulate_search_api(query, top_k=5, proxy=None, filter_year=None, use_concur
         filter_year (int, optional): Filter results by specific year. Defaults to None.
         use_concurrent (bool): Whether to use concurrent scraping. Defaults to True.
         max_workers (int): Maximum concurrent workers for scraping. Defaults to 3.
-        show_browser (bool): Whether to show browser window. Defaults to False.
     
     Returns:
         list: A list of dictionaries containing search results with scraped content.
     """
-    google_results = search_google(query, num_results=top_k, proxy=proxy, filter_year=filter_year, show_browser=show_browser)
+    google_results = search_google(query, num_results=top_k, proxy=proxy, filter_year=filter_year)
 
     if not google_results:
         print(f"[!] Could not retrieve initial search results for query: '{query}'. Skipping.")
@@ -367,9 +382,6 @@ if __name__ == "__main__":
     use_concurrent_scraping = True  # Enable concurrent scraping for faster processing
     max_concurrent_workers = 3      # Number of concurrent threads (recommended: 2-5)
     
-    # --- Profile Cleanup Configuration ---
-    cleanup_interval = 5            # Clean chrome profile every X queries
-    
     number_of_results_to_process = 3
     output_directory = "search_outputs"
     
@@ -380,10 +392,6 @@ if __name__ == "__main__":
     
     # --- Main Execution Logic ---
     os.makedirs(output_directory, exist_ok=True)
-    
-    # Initialize query counter for profile cleanup
-    query_count = 0
-    profile_path = os.path.join(os.getcwd(), "chrome_profile")
 
     if not os.path.exists("chrome_profile"):
         print("\n" + "="*80)
@@ -391,8 +399,7 @@ if __name__ == "__main__":
         print("="*80 + "\n")
 
         simulate_search_api(initial_query, top_k=1, proxy=proxy_server, filter_year=filter_year, 
-                            use_concurrent=use_concurrent_scraping, max_workers=max_concurrent_workers, 
-                            show_browser=True)  # Show browser for initial setup
+                            use_concurrent=use_concurrent_scraping, max_workers=max_concurrent_workers)
 
         if os.path.exists("chrome_profile"):
             print("\n" + "="*80)
@@ -405,29 +412,13 @@ if __name__ == "__main__":
             exit(1)
 
     for i, query in enumerate(queries_to_process):
-        query_count += 1
-        
-        # Check if we need to clean the profile
-        need_cleanup = query_count % cleanup_interval == 1 and query_count > 1
-        show_browser_this_time = False
-        
-        if need_cleanup:
-            print("\n" + "🔄"*20)
-            print(f"--- Profile Cleanup Time (Query #{query_count}) ---")
-            print("🔄"*20 + "\n")
-            
-            if clean_chrome_profile(profile_path):
-                show_browser_this_time = True  # Show browser after cleanup for re-initialization
-                print("🖥️ Will show browser for profile re-initialization")
-        
         print("\n" + "="*80)
         print(f"--- Processing Query {i+1}/{len(queries_to_process)}: '{query}' ---")
-        print(f"--- Total Queries Processed: {query_count} ---")
         print("="*80 + "\n")
         
         final_data = simulate_search_api(query, top_k=number_of_results_to_process, proxy=proxy_server, 
                                          filter_year=filter_year, use_concurrent=use_concurrent_scraping, 
-                                         max_workers=max_concurrent_workers, show_browser=show_browser_this_time)
+                                         max_workers=max_concurrent_workers)
 
         print(f"\n--- Query Processing Complete for '{query}' ---")
 
