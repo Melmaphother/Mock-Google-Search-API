@@ -35,7 +35,7 @@ def clean_chrome_profile(profile_path):
         return True
 
 
-def search_google(query, num_results=10, proxy=None, filter_year=None, retry_on_error=True):
+def search_google(query, num_results=10, proxy=None, filter_year=None, retry_on_error=True, show_browser=False):
     """
     Performs a Google search using an undetected chromedriver to avoid bot detection.
     
@@ -45,6 +45,7 @@ def search_google(query, num_results=10, proxy=None, filter_year=None, retry_on_
         proxy (str, optional): Proxy server to use. Defaults to None.
         filter_year (int, optional): Filter results by specific year (e.g., 2023). Defaults to None.
         retry_on_error (bool): Whether to retry with profile cleanup on error. Defaults to True.
+        show_browser (bool): Whether to show browser window (for handling captcha/verification). Defaults to False.
 
     Returns:
         list: A list of dictionaries, each containing search result data.
@@ -71,7 +72,15 @@ def search_google(query, num_results=10, proxy=None, filter_year=None, retry_on_
     
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--headless")  # Always run in headless mode
+    
+    # Control browser visibility based on show_browser parameter
+    if show_browser:
+        print("🖥️ Running in visible browser mode (for verification handling)")
+        options.add_argument("--start-maximized")
+        # Add a small delay to allow manual interaction if needed
+    else:
+        print("👻 Running in headless mode")
+        options.add_argument("--headless")
 
     driver = None
     try:
@@ -152,9 +161,11 @@ def search_google(query, num_results=10, proxy=None, filter_year=None, retry_on_
             # Clean the profile
             if clean_chrome_profile(profile_path):
                 print("♻️ Retrying search with clean profile...")
+                print("🖥️ Showing browser for potential verification handling...")
                 try:
-                    # Recursive call with retry disabled to avoid infinite loop
-                    return search_google(query, num_results, proxy, filter_year, retry_on_error=False)
+                    # Recursive call with retry disabled and browser visible for verification
+                    return search_google(query, num_results, proxy, filter_year, 
+                                       retry_on_error=False, show_browser=True)
                 except Exception as retry_e:
                     print(f"[!] Retry also failed: {retry_e}")
         
