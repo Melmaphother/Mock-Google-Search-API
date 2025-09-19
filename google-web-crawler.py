@@ -8,34 +8,9 @@ import re
 import undetected_chromedriver as uc
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
-import shutil
 
 
-def clean_chrome_profile(profile_path):
-    """
-    Clean Chrome profile directory to refresh session.
-    
-    Args:
-        profile_path (str): Path to Chrome profile directory
-    
-    Returns:
-        bool: True if profile was cleaned successfully, False otherwise
-    """
-    if os.path.exists(profile_path):
-        try:
-            print(f"🧹 Cleaning Chrome profile: {profile_path}")
-            shutil.rmtree(profile_path)
-            print("✅ Chrome profile cleaned successfully")
-            return True
-        except Exception as e:
-            print(f"⚠️ Failed to clean Chrome profile: {e}")
-            return False
-    else:
-        print("📁 Chrome profile directory doesn't exist")
-        return True
-
-
-def search_google(query, num_results=10, proxy=None, filter_year=None, retry_on_error=True, show_browser=False):
+def search_google(query, num_results=10, proxy=None, filter_year=None):
     """
     Performs a Google search using an undetected chromedriver to avoid bot detection.
     
@@ -44,8 +19,6 @@ def search_google(query, num_results=10, proxy=None, filter_year=None, retry_on_
         num_results (int): The number of results to retrieve.
         proxy (str, optional): Proxy server to use. Defaults to None.
         filter_year (int, optional): Filter results by specific year (e.g., 2023). Defaults to None.
-        retry_on_error (bool): Whether to retry with profile cleanup on error. Defaults to True.
-        show_browser (bool): Whether to show browser window (for handling captcha/verification). Defaults to False.
 
     Returns:
         list: A list of dictionaries, each containing search result data.
@@ -72,15 +45,10 @@ def search_google(query, num_results=10, proxy=None, filter_year=None, retry_on_
     
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--start-maximized")  # Always show browser window
     
-    # Control browser visibility based on show_browser parameter
-    if show_browser:
-        print("🖥️ Running in visible browser mode (for verification handling)")
-        options.add_argument("--start-maximized")
-        # Add a small delay to allow manual interaction if needed
-    else:
-        print("👻 Running in headless mode")
-        options.add_argument("--headless")
+    print("🖥️ Running in visible browser mode")
+
 
     driver = None
     try:
@@ -144,31 +112,6 @@ def search_google(query, num_results=10, proxy=None, filter_year=None, retry_on_
 
     except Exception as e:
         print(f"[!] An error occurred during the browser-based search: {e}")
-        
-        # If retry is enabled, clean profile and try once more
-        if retry_on_error:
-            print("🔄 Attempting to recover by cleaning Chrome profile...")
-            profile_path = os.path.join(os.getcwd(), "chrome_profile")
-            
-            # Clean up the driver first
-            if driver:
-                try:
-                    driver.quit()
-                except:
-                    pass
-                driver = None
-            
-            # Clean the profile
-            if clean_chrome_profile(profile_path):
-                print("♻️ Retrying search with clean profile...")
-                print("🖥️ Showing browser for potential verification handling...")
-                try:
-                    # Recursive call with retry disabled and browser visible for verification
-                    return search_google(query, num_results, proxy, filter_year, 
-                                       retry_on_error=False, show_browser=True)
-                except Exception as retry_e:
-                    print(f"[!] Retry also failed: {retry_e}")
-        
         return []
     finally:
         if driver:
@@ -327,7 +270,6 @@ def simulate_search_api(query, top_k=5, proxy=None, filter_year=None, use_concur
         filter_year (int, optional): Filter results by specific year. Defaults to None.
         use_concurrent (bool): Whether to use concurrent scraping. Defaults to True.
         max_workers (int): Maximum concurrent workers for scraping. Defaults to 3.
-    
     Returns:
         list: A list of dictionaries containing search results with scraped content.
     """
@@ -383,7 +325,7 @@ if __name__ == "__main__":
         "What is transformer in deep learning?",
         "Latest advancements in large language models",
         "Python undetected-chromedriver tutorial"
-    ]
+    ] * 10
     
     # --- Year Filter Configuration ---
     # Set to specific year to filter results (e.g., 2023), or None for no filter
