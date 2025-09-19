@@ -29,8 +29,6 @@ class Task:
         self.started_at: float | None = None
         self.finished_at: float | None = None
         self.error: str | None = None
-        self.retry_count = 0  # Track retry attempts
-        self.show_browser = False  # Show browser for verification
 
 
 class TaskStore:
@@ -65,37 +63,13 @@ class TaskStore:
             if task is None:
                 return False
             if error:
-                # Check if this is a Chrome-related error that should trigger retry
-                if self._should_retry_task(task, error):
-                    print(f"🔄 [SERVER] Task {task_id} failed with Chrome error, scheduling retry with browser visible")
-                    task.retry_count += 1
-                    task.show_browser = True  # Show browser for retry
-                    task.status = "queued"  # Re-queue the task
-                    task.error = None
-                    self._pending_q.put(task_id)  # Re-add to queue
-                    return True
-                else:
-                    task.status = "failed"
-                    task.error = str(error)
+                task.status = "failed"
+                task.error = str(error)
             else:
                 task.status = "done"
                 self._results[task_id] = results or []
             task.finished_at = time.time()
             return True
-    
-    def _should_retry_task(self, task: Task, error: str) -> bool:
-        """Check if task should be retried based on error type."""
-        if task.retry_count >= 1:  # Only retry once
-            return False
-        
-        # Chrome-related errors that should trigger retry
-        chrome_errors = [
-            "chrome", "driver", "webdriver", "browser", 
-            "timeout", "sorry", "captcha", "verification"
-        ]
-        
-        error_lower = error.lower()
-        return any(err in error_lower for err in chrome_errors)
 
     def get_task(self, task_id: str) -> Task | None:
         with self._lock:
@@ -125,8 +99,6 @@ class TaskStore:
                     "filter_year": t.filter_year,
                     "status": t.status,
                     "error": t.error,
-                    "retry_count": t.retry_count,
-                    "show_browser": t.show_browser,
                     "created_at": t.created_at,
                     "started_at": t.started_at,
                     "finished_at": t.finished_at,
@@ -195,8 +167,6 @@ class APIServerHandler(BaseHTTPRequestHandler):
                     "top_k": task.top_k,
                     "proxy": task.proxy,
                     "filter_year": task.filter_year,
-                    "show_browser": task.show_browser,
-                    "retry_count": task.retry_count,
                 }
             )
             return
@@ -334,10 +304,6 @@ def _load_crawler_module(crawler_script_path: str):
         if not hasattr(module, name):
             raise RuntimeError(f"Crawler script missing required function: {name}")
     
-    # Check if clean_chrome_profile function exists
-    if hasattr(module, "clean_chrome_profile"):
-        print("[CLIENT] Chrome profile cleanup function available")
-    
     return module
 
 
@@ -405,36 +371,21 @@ def client_loop(
             top_k = int(payload.get("top_k") or 3)
             proxy = payload.get("proxy")
             filter_year = payload.get("filter_year")
-            show_browser = payload.get("show_browser", False)
-            retry_count = payload.get("retry_count", 0)
 
             if not task_id or not query:
                 time.sleep(poll_interval)
                 continue
 
-            retry_info = f" (retry #{retry_count})" if retry_count > 0 else ""
-            browser_info = " [BROWSER VISIBLE]" if show_browser else " [HEADLESS]"
-            print(f"[CLIENT] got task {task_id}: '{query}' (top_k={top_k}){retry_info}{browser_info}")
-
-            # Handle profile cleanup if this is a retry
-            if show_browser and retry_count > 0:
-                print("🔄 [CLIENT] Retry with profile cleanup requested")
-                if hasattr(module, "clean_chrome_profile"):
-                    import os
-                    profile_path = os.path.join(os.getcwd(), "chrome_profile")
-                    module.clean_chrome_profile(profile_path)
-                    print("🖥️ [CLIENT] Profile cleaned, will show browser for verification")
+            print(f"[CLIENT] got task {task_id}: '{query}' (top_k={top_k})")
 
             # Execute search
             try:
-                # Use the search_google function directly to control browser visibility
+                # Use the search_google function directly
                 results = module.search_google(
                     query, 
                     num_results=top_k, 
                     proxy=proxy, 
-                    filter_year=filter_year,
-                    retry_on_error=False,  # Don't retry here, let server handle it
-                    show_browser=show_browser
+                    filter_year=filter_year
                 )
                 
                 # If we got results, scrape the pages
